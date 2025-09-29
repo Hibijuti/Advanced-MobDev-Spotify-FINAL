@@ -1,9 +1,210 @@
-import React, { useState } from "react";
 import { createDrawerNavigator } from "@react-navigation/drawer";
-import { View, Text, Image, StyleSheet, TouchableOpacity, FlatList } from "react-native";
 import { useRouter } from "expo-router";
+import React, { memo, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  Alert,
+  Animated,
+  FlatList,
+  Image,
+  PanResponder,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 const Drawer = createDrawerNavigator();
+
+// Playlist Reducer for state management with history
+const playlistReducer = (state, action) => {
+  switch (action.type) {
+    case "ADD_SONG":
+      return {
+        ...state,
+        songs: [...state.songs, { id: Date.now().toString(), name: action.payload }],
+        history: [...state.history, { type: "ADD_SONG", song: { id: Date.now().toString(), name: action.payload } }],
+        future: [],
+      };
+    
+    case "REMOVE_SONG":
+      const songToRemove = state.songs.find(s => s.id === action.payload);
+      return {
+        ...state,
+        songs: state.songs.filter(song => song.id !== action.payload),
+        history: [...state.history, { type: "REMOVE_SONG", song: songToRemove }],
+        future: [],
+      };
+    
+    case "CLEAR_PLAYLIST":
+      return {
+        ...state,
+        songs: [],
+        history: [...state.history, { type: "CLEAR_PLAYLIST", songs: state.songs }],
+        future: [],
+      };
+    
+    case "UNDO":
+      if (state.history.length === 0) return state;
+      const lastAction = state.history[state.history.length - 1];
+      let newSongs = [...state.songs];
+      
+      if (lastAction.type === "ADD_SONG") {
+        newSongs = state.songs.filter(s => s.id !== lastAction.song.id);
+      } else if (lastAction.type === "REMOVE_SONG") {
+        newSongs = [...state.songs, lastAction.song];
+      } else if (lastAction.type === "CLEAR_PLAYLIST") {
+        newSongs = lastAction.songs;
+      }
+      
+      return {
+        ...state,
+        songs: newSongs,
+        history: state.history.slice(0, -1),
+        future: [...state.future, lastAction],
+      };
+    
+    case "REDO":
+      if (state.future.length === 0) return state;
+      const nextAction = state.future[state.future.length - 1];
+      let redoSongs = [...state.songs];
+      
+      if (nextAction.type === "ADD_SONG") {
+        redoSongs = [...state.songs, nextAction.song];
+      } else if (nextAction.type === "REMOVE_SONG") {
+        redoSongs = state.songs.filter(s => s.id !== nextAction.song.id);
+      } else if (nextAction.type === "CLEAR_PLAYLIST") {
+        redoSongs = [];
+      }
+      
+      return {
+        ...state,
+        songs: redoSongs,
+        history: [...state.history, nextAction],
+        future: state.future.slice(0, -1),
+      };
+    
+    case "RESTORE_STATE":
+      return action.payload;
+    
+    default:
+      return state;
+  }
+};
+
+// Swipeable Song Item Component with Delete
+const SongItem = memo(({ song, onRemove, index }) => {
+  const [fadeAnim] = useState(new Animated.Value(0));
+  const [slideInAnim] = useState(new Animated.Value(-50));
+  const translateX = useRef(new Animated.Value(0)).current;
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.spring(slideInAnim, {
+        toValue: 0,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Math.abs(gestureState.dx) > 5;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        // Only allow swiping left (negative values)
+        if (gestureState.dx < 0) {
+          // Limit swipe to -80 pixels
+          const newValue = Math.max(gestureState.dx, -80);
+          translateX.setValue(newValue);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx < -40) {
+          // Swipe far enough, snap to open position
+          Animated.spring(translateX, {
+            toValue: -80,
+            useNativeDriver: true,
+            friction: 8,
+          }).start();
+        } else {
+          // Snap back to closed position
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 8,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  const handleRemove = () => {
+    setIsDeleting(true);
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateX, {
+        toValue: 100,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      onRemove(song.id);
+    });
+  };
+
+  return (
+    <View style={styles.songItemContainer}>
+      {/* Delete Button Background */}
+      <View style={styles.deleteBackground}>
+        <TouchableOpacity 
+          style={styles.deleteButton} 
+          onPress={handleRemove}
+          disabled={isDeleting}
+        >
+          <Text style={styles.deleteButtonText}>Delete</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Swipeable Song Item */}
+      <Animated.View
+        style={[
+          styles.songItem,
+          {
+            opacity: fadeAnim,
+            transform: [
+              { translateX: slideInAnim },
+              { translateX: translateX },
+            ],
+          },
+        ]}
+        {...panResponder.panHandlers}
+      >
+        <View style={styles.songInfo}>
+          <Text style={styles.songNumber}>{index + 1}</Text>
+          <Text style={styles.songName}>{song.name}</Text>
+        </View>
+        <View style={styles.swipeIndicator}>
+          <Text style={styles.swipeIndicatorText}>⟨</Text>
+        </View>
+      </Animated.View>
+    </View>
+  );
+});
 
 function ProfileScreen() {
   const user = {
@@ -32,6 +233,126 @@ function SettingsScreen() {
       >
         <Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
+    </View>
+  );
+}
+
+function PlaylistManagerScreen() {
+  const initialState = {
+    songs: [],
+    history: [],
+    future: [],
+  };
+
+  const [state, dispatch] = useReducer(playlistReducer, initialState);
+  const [songInput, setSongInput] = useState("");
+
+  const handleAddSong = () => {
+    if (songInput.trim()) {
+      dispatch({ type: "ADD_SONG", payload: songInput.trim() });
+      setSongInput("");
+    } else {
+      Alert.alert("Empty Input", "Please enter a song name");
+    }
+  };
+
+  const handleRemoveSong = useCallback((id) => {
+    dispatch({ type: "REMOVE_SONG", payload: id });
+  }, []);
+
+  const handleClearPlaylist = () => {
+    if (state.songs.length > 0) {
+      Alert.alert(
+        "Clear Playlist",
+        "Are you sure you want to clear all songs?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Clear", onPress: () => dispatch({ type: "CLEAR_PLAYLIST" }) },
+        ]
+      );
+    }
+  };
+
+  const handleUndo = () => {
+    if (state.history.length > 0) {
+      dispatch({ type: "UNDO" });
+    }
+  };
+
+  const handleRedo = () => {
+    if (state.future.length > 0) {
+      dispatch({ type: "REDO" });
+    }
+  };
+
+  return (
+    <View style={styles.center}>
+      <Text style={styles.playlistHeader}>My Playlist</Text>
+      <Text style={styles.songCount}>{state.songs.length} songs</Text>
+
+      {/* Input Section */}
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter song name..."
+          placeholderTextColor="#999"
+          value={songInput}
+          onChangeText={setSongInput}
+          onSubmitEditing={handleAddSong}
+        />
+        <TouchableOpacity style={styles.addButton} onPress={handleAddSong}>
+          <Text style={styles.addButtonText}>+</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Action Buttons */}
+      <View style={styles.actionBar}>
+        <TouchableOpacity
+          style={[styles.actionButton, state.history.length === 0 && styles.disabledButton]}
+          onPress={handleUndo}
+          disabled={state.history.length === 0}
+        >
+          <Text style={styles.actionButtonText}>↶ Undo</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[styles.actionButton, state.future.length === 0 && styles.disabledButton]}
+          onPress={handleRedo}
+          disabled={state.future.length === 0}
+        >
+          <Text style={styles.actionButtonText}>↷ Redo</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[styles.actionButton, styles.clearButton]}
+          onPress={handleClearPlaylist}
+        >
+          <Text style={styles.actionButtonText}>Clear</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Hint Text */}
+      {state.songs.length > 0 && (
+        <Text style={styles.swipeHint}>← Swipe left to delete songs</Text>
+      )}
+
+      {/* Playlist */}
+      {state.songs.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>🎵</Text>
+          <Text style={styles.emptyStateSubtext}>Your playlist is empty</Text>
+          <Text style={styles.emptyStateHint}>Add some songs to get started!</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={state.songs}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item, index }) => (
+            <SongItem song={item} onRemove={handleRemoveSong} index={index} />
+          )}
+          contentContainerStyle={styles.listContainer}
+        />
+      )}
     </View>
   );
 }
@@ -110,7 +431,8 @@ export default function HomePage() {
       }}
     >
       <Drawer.Screen name="Profile" component={ProfileScreen} />
-      <Drawer.Screen name="Playlists" component={PlaylistScreen} />
+      <Drawer.Screen name="Playlist Manager" component={PlaylistManagerScreen} />
+      <Drawer.Screen name="Favorites" component={PlaylistScreen} />
       <Drawer.Screen name="Settings" component={SettingsScreen} />
     </Drawer.Navigator>
   );
@@ -150,12 +472,12 @@ const styles = StyleSheet.create({
   logoutButton: {
     marginTop: 40,
     padding: 15,
-    backgroundColor: "#277944ff",
+    backgroundColor: "#1DB954",
     borderRadius: 25,
     alignItems: "center",
   },
   logoutText: {
-    color: "#000000ff",
+    color: "#ffffff",
     fontSize: 18,
     fontWeight: "bold",
   },
@@ -167,12 +489,156 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textAlign: "center",
   },
-  playlistSubheader: {
-    fontSize: 13,
+  songCount: {
+    fontSize: 14,
     color: "#b0ffb0",
     marginBottom: 20,
     textAlign: "center",
+  },
+  swipeHint: {
+    fontSize: 12,
+    color: "#b0ffb0",
+    marginBottom: 10,
+    textAlign: "center",
     fontStyle: "italic",
+  },
+  inputContainer: {
+    flexDirection: "row",
+    marginBottom: 20,
+    gap: 10,
+  },
+  input: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 15,
+    padding: 15,
+    fontSize: 16,
+    color: "#000",
+  },
+  addButton: {
+    backgroundColor: "#1DB954",
+    borderRadius: 15,
+    width: 55,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  addButtonText: {
+    color: "#fff",
+    fontSize: 28,
+    fontWeight: "bold",
+  },
+  actionBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 20,
+    gap: 8,
+  },
+  actionButton: {
+    flex: 1,
+    backgroundColor: "#1DB954",
+    padding: 12,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  disabledButton: {
+    backgroundColor: "#555",
+    opacity: 0.5,
+  },
+  clearButton: {
+    backgroundColor: "#ff4444",
+  },
+  actionButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  listContainer: {
+    paddingBottom: 20,
+  },
+  songItemContainer: {
+    marginBottom: 10,
+    height: 70,
+    position: "relative",
+  },
+  deleteBackground: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 80,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#ff4444",
+    borderRadius: 12,
+  },
+  deleteButton: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  deleteButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  songItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    padding: 15,
+    borderRadius: 12,
+    height: 70,
+  },
+  songInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  songNumber: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#1DB954",
+    marginRight: 15,
+    width: 30,
+  },
+  songName: {
+    fontSize: 16,
+    color: "#000",
+    flex: 1,
+  },
+  swipeIndicator: {
+    marginLeft: 10,
+  },
+  swipeIndicatorText: {
+    color: "#999",
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  emptyStateText: {
+    fontSize: 60,
+    marginBottom: 10,
+  },
+  emptyStateSubtext: {
+    fontSize: 20,
+    color: "#fff",
+    fontWeight: "bold",
+    marginBottom: 5,
+  },
+  emptyStateHint: {
+    fontSize: 14,
+    color: "#b0ffb0",
+  },
+  loadingText: {
+    fontSize: 18,
+    color: "#fff",
+    textAlign: "center",
   },
   playlistCardAlt: {
     flexDirection: "column",
