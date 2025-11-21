@@ -23,6 +23,16 @@ Theme Switcher
 <img width="402" height="875" alt="image" src="https://github.com/user-attachments/assets/eb55de88-a094-4c98-a530-06835509d33d" />
 
 
+Map Explorer
+<img width="403" height="875" alt="image" src="https://github.com/user-attachments/assets/96831987-39df-486e-8862-4ec1d57b999f" />
+<img width="402" height="857" alt="image" src="https://github.com/user-attachments/assets/017ff90a-fcc1-4832-a8df-c3c1f927f2b5" />
+<img width="405" height="884" alt="image" src="https://github.com/user-attachments/assets/c9f187fc-9a6c-48ae-ac30-a5ad28a592a1" />
+<img width="407" height="865" alt="image" src="https://github.com/user-attachments/assets/398d93e4-26a4-4163-ad25-0dd455b1c2c2" />
+
+
+
+
+
 
 
 
