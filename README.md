@@ -17,6 +17,11 @@ Profile Creation
 <img width="392" height="859" alt="image" src="https://github.com/user-attachments/assets/ad371264-4034-4eae-8377-87a055f233f2" />
 <img width="400" height="867" alt="image" src="https://github.com/user-attachments/assets/c030bd63-1196-4aaf-8695-00999e223100" />
 <img width="396" height="871" alt="image" src="https://github.com/user-attachments/assets/35283445-9ec8-4050-8cb9-768b3951bff7" />
+Theme Switcher
+<img width="407" height="878" alt="image" src="https://github.com/user-attachments/assets/497a7c37-21c3-4eb7-8374-509a27910277" />
+<img width="408" height="877" alt="image" src="https://github.com/user-attachments/assets/94f84ed1-ae3b-47eb-bef1-42af8f05c96e" />
+<img width="402" height="875" alt="image" src="https://github.com/user-attachments/assets/eb55de88-a094-4c98-a530-06835509d33d" />
+
 
 
 
