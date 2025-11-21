@@ -1,4 +1,5 @@
 import { createDrawerNavigator } from "@react-navigation/drawer";
+import * as Location from 'expo-location';
 import { useRouter } from "expo-router";
 import React, { memo, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
@@ -13,8 +14,35 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import MapView, { Circle, Marker } from 'react-native-maps';
 
 const Drawer = createDrawerNavigator();
+
+// Custom Dark Map Style
+const darkMapStyle = [
+  {
+    "elementType": "geometry",
+    "stylers": [{ "color": "#212121" }]
+  },
+  {
+    "elementType": "labels.text.fill",
+    "stylers": [{ "color": "#757575" }]
+  },
+  {
+    "elementType": "labels.text.stroke",
+    "stylers": [{ "color": "#212121" }]
+  },
+  {
+    "featureType": "water",
+    "elementType": "geometry",
+    "stylers": [{ "color": "#000000" }]
+  },
+  {
+    "featureType": "water",
+    "elementType": "labels.text.fill",
+    "stylers": [{ "color": "#3d3d3d" }]
+  }
+];
 
 // Playlist Reducer for state management with history
 const playlistReducer = (state, action) => {
@@ -122,23 +150,19 @@ const SongItem = memo(({ song, onRemove, index }) => {
         return Math.abs(gestureState.dx) > 5;
       },
       onPanResponderMove: (_, gestureState) => {
-        // Only allow swiping left (negative values)
         if (gestureState.dx < 0) {
-          // Limit swipe to -80 pixels
           const newValue = Math.max(gestureState.dx, -80);
           translateX.setValue(newValue);
         }
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dx < -40) {
-          // Swipe far enough, snap to open position
           Animated.spring(translateX, {
             toValue: -80,
             useNativeDriver: true,
             friction: 8,
           }).start();
         } else {
-          // Snap back to closed position
           Animated.spring(translateX, {
             toValue: 0,
             useNativeDriver: true,
@@ -169,7 +193,6 @@ const SongItem = memo(({ song, onRemove, index }) => {
 
   return (
     <View style={styles.songItemContainer}>
-      {/* Delete Button Background */}
       <View style={styles.deleteBackground}>
         <TouchableOpacity 
           style={styles.deleteButton} 
@@ -180,7 +203,6 @@ const SongItem = memo(({ song, onRemove, index }) => {
         </TouchableOpacity>
       </View>
 
-      {/* Swipeable Song Item */}
       <Animated.View
         style={[
           styles.songItem,
@@ -205,6 +227,244 @@ const SongItem = memo(({ song, onRemove, index }) => {
     </View>
   );
 });
+
+// NEW MAP SCREEN
+function MapScreen() {
+  const [location, setLocation] = useState(null);
+  const [errorMsg, setErrorMsg] = useState(null);
+  const [geofenceAlerts, setGeofenceAlerts] = useState({});
+  const mapRef = useRef(null);
+
+  // Mock Points of Interest (Music venues theme for Spotify app)
+  const pointsOfInterest = [
+    {
+      id: '1',
+      title: 'Rock Arena',
+      description: 'Live rock concerts venue',
+      coordinate: { latitude: 10.3157, longitude: 123.8854 }, // Cebu City
+      color: '#FF6B6B'
+    },
+    {
+      id: '2',
+      title: 'Jazz Club',
+      description: 'Smooth jazz performances',
+      coordinate: { latitude: 10.3200, longitude: 123.8900 },
+      color: '#4ECDC4'
+    },
+    {
+      id: '3',
+      title: 'EDM Festival Grounds',
+      description: 'Electronic music events',
+      coordinate: { latitude: 10.3100, longitude: 123.8800 },
+      color: '#FFE66D'
+    }
+  ];
+
+  // Geofence radius (100 meters)
+  const GEOFENCE_RADIUS = 100;
+
+  useEffect(() => {
+    (async () => {
+      // Request location permissions
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setErrorMsg('Permission to access location was denied');
+        return;
+      }
+
+      // Get initial location
+      let currentLocation = await Location.getCurrentPositionAsync({});
+      setLocation(currentLocation);
+
+      // Watch location for geofencing
+      Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 5000,
+          distanceInterval: 10,
+        },
+        (newLocation) => {
+          setLocation(newLocation);
+          checkGeofences(newLocation);
+        }
+      );
+    })();
+  }, []);
+
+  // Calculate distance between two coordinates (Haversine formula)
+  const getDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
+  };
+
+  // Check if user entered/left geofence zones
+  const checkGeofences = (currentLocation) => {
+    pointsOfInterest.forEach((poi) => {
+      const distance = getDistance(
+        currentLocation.coords.latitude,
+        currentLocation.coords.longitude,
+        poi.coordinate.latitude,
+        poi.coordinate.longitude
+      );
+
+      const isInside = distance <= GEOFENCE_RADIUS;
+      const wasInside = geofenceAlerts[poi.id];
+
+      if (isInside && !wasInside) {
+        // Entered geofence
+        Alert.alert(
+          '🎵 You entered a music zone!',
+          `Welcome to ${poi.title}!`,
+          [{ text: 'Cool!', style: 'default' }]
+        );
+        setGeofenceAlerts(prev => ({ ...prev, [poi.id]: true }));
+      } else if (!isInside && wasInside) {
+        // Left geofence
+        Alert.alert(
+          '👋 Left music zone',
+          `You left ${poi.title}`,
+          [{ text: 'OK', style: 'default' }]
+        );
+        setGeofenceAlerts(prev => ({ ...prev, [poi.id]: false }));
+      }
+    });
+  };
+
+  // Zoom controls
+  const zoomIn = () => {
+    if (mapRef.current && location) {
+      mapRef.current.animateCamera({
+        center: {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        },
+        zoom: 16,
+      }, { duration: 500 });
+    }
+  };
+
+  const zoomOut = () => {
+    if (mapRef.current && location) {
+      mapRef.current.animateCamera({
+        center: {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        },
+        zoom: 12,
+      }, { duration: 500 });
+    }
+  };
+
+  const centerOnUser = () => {
+    if (mapRef.current && location) {
+      mapRef.current.animateToRegion({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      }, 1000);
+    }
+  };
+
+  if (errorMsg) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>{errorMsg}</Text>
+      </View>
+    );
+  }
+
+  if (!location) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.loadingText}>Loading map...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.mapContainer}>
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        customMapStyle={darkMapStyle}
+        initialRegion={{
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        }}
+        showsUserLocation={true}
+        showsMyLocationButton={false}
+        followsUserLocation={true}
+      >
+        {/* User's current location marker */}
+        <Marker
+          coordinate={{
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          }}
+          title="You are here"
+          pinColor="#1DB954"
+        />
+
+        {/* Points of Interest */}
+        {pointsOfInterest.map((poi) => (
+          <React.Fragment key={poi.id}>
+            <Marker
+              coordinate={poi.coordinate}
+              title={poi.title}
+              description={poi.description}
+              pinColor={poi.color}
+            />
+            {/* Geofence circles */}
+            <Circle
+              center={poi.coordinate}
+              radius={GEOFENCE_RADIUS}
+              strokeColor={poi.color}
+              fillColor={`${poi.color}33`}
+              strokeWidth={2}
+            />
+          </React.Fragment>
+        ))}
+      </MapView>
+
+      {/* Map Controls */}
+      <View style={styles.mapControls}>
+        <TouchableOpacity style={styles.controlButton} onPress={zoomIn}>
+          <Text style={styles.controlButtonText}>+</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.controlButton} onPress={zoomOut}>
+          <Text style={styles.controlButtonText}>−</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.controlButton} onPress={centerOnUser}>
+          <Text style={styles.controlButtonText}>📍</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Legend */}
+      <View style={styles.legend}>
+        <Text style={styles.legendTitle}>Music Venues</Text>
+        {pointsOfInterest.map((poi) => (
+          <View key={poi.id} style={styles.legendItem}>
+            <View style={[styles.legendColor, { backgroundColor: poi.color }]} />
+            <Text style={styles.legendText}>{poi.title}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
 
 function ProfileScreen() {
   const user = {
@@ -290,7 +550,6 @@ function PlaylistManagerScreen() {
       <Text style={styles.playlistHeader}>My Playlist</Text>
       <Text style={styles.songCount}>{state.songs.length} songs</Text>
 
-      {/* Input Section */}
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
@@ -305,7 +564,6 @@ function PlaylistManagerScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Action Buttons */}
       <View style={styles.actionBar}>
         <TouchableOpacity
           style={[styles.actionButton, state.history.length === 0 && styles.disabledButton]}
@@ -331,12 +589,10 @@ function PlaylistManagerScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Hint Text */}
       {state.songs.length > 0 && (
         <Text style={styles.swipeHint}>← Swipe left to delete songs</Text>
       )}
 
-      {/* Playlist */}
       {state.songs.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateText}>🎵</Text>
@@ -431,6 +687,7 @@ export default function HomePage() {
       }}
     >
       <Drawer.Screen name="Profile" component={ProfileScreen} />
+      <Drawer.Screen name="Map Explorer" component={MapScreen} />
       <Drawer.Screen name="Playlist Manager" component={PlaylistManagerScreen} />
       <Drawer.Screen name="Favorites" component={PlaylistScreen} />
       <Drawer.Screen name="Settings" component={SettingsScreen} />
@@ -640,6 +897,11 @@ const styles = StyleSheet.create({
     color: "#fff",
     textAlign: "center",
   },
+  errorText: {
+    fontSize: 16,
+    color: "#ff4444",
+    textAlign: "center",
+  },
   playlistCardAlt: {
     flexDirection: "column",
     alignItems: "center",
@@ -668,10 +930,65 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 2,
   },
-  playlistDesc: {
-    fontSize: 11,
-    color: "#d0ffd0",
-    marginTop: 0,
-    textAlign: "center",
+  // MAP STYLES
+  mapContainer: {
+    flex: 1,
+  },
+  map: {
+    flex: 1,
+  },
+  mapControls: {
+    position: 'absolute',
+    right: 20,
+    top: 20,
+    gap: 10,
+  },
+  controlButton: {
+    backgroundColor: '#1DB954',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  controlButtonText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  legend: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    backgroundColor: 'rgba(24, 28, 36, 0.9)',
+    padding: 15,
+    borderRadius: 12,
+    minWidth: 180,
+  },
+  legendTitle: {
+    color: '#1DB954',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  legendColor: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    marginRight: 10,
+  },
+  legendText: {
+    color: '#fff',
+    fontSize: 14,
   },
 });
